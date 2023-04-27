@@ -693,6 +693,7 @@ using namespace Firebird;
 %token <metaNamePtr> TIMEZONE_NAME
 %token <metaNamePtr> UNICODE_CHAR
 %token <metaNamePtr> UNICODE_VAL
+%token <metaNamePtr> SLEEP
 
 // precedence declarations for expression evaluation
 
@@ -8251,6 +8252,7 @@ system_function_std_syntax
 	| SIGN
 	| SIN
 	| SINH
+	| SLEEP
 	| SQRT
 	| TAN
 	| TANH
@@ -9180,6 +9182,7 @@ non_reserved_word
 	| BLOB_APPEND
 	// added in FB 5.0
 	| LOCKED
+	| SLEEP
 	| TARGET
 	| TIMEZONE_NAME
 	| UNICODE_CHAR

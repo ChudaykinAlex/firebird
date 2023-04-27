@@ -461,6 +461,7 @@ static const TOK tokens[] =
 	{TOK_SINH, "SINH", true},
 	{TOK_SIZE, "SIZE", true},
 	{TOK_SKIP, "SKIP", true},
+	{TOK_SLEEP, "SLEEP", false},
 	{TOK_SMALLINT, "SMALLINT", false},
 	{TOK_SNAPSHOT, "SNAPSHOT", true},
 	{TOK_SOME, "SOME", false},

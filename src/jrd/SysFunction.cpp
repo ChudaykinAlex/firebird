@@ -342,6 +342,7 @@ dsc* evlRight(thread_db* tdbb, const SysFunction* function, const NestValueArray
 dsc* evlRoleInUse(thread_db* tdbb, const SysFunction* function, const NestValueArray& args, impure_value* impure);
 dsc* evlRound(thread_db* tdbb, const SysFunction* function, const NestValueArray& args, impure_value* impure);
 dsc* evlSign(thread_db* tdbb, const SysFunction* function, const NestValueArray& args, impure_value* impure);
+dsc* evlSleep(thread_db* tdbb, const SysFunction* function, const NestValueArray& args, impure_value* impure);
 dsc* evlSqrt(thread_db* tdbb, const SysFunction* function, const NestValueArray& args, impure_value* impure);
 dsc* evlSystemPrivilege(thread_db* tdbb, const SysFunction* function, const NestValueArray& args, impure_value* impure);
 dsc* evlTrunc(thread_db* tdbb, const SysFunction* function, const NestValueArray& args, impure_value* impure);
@@ -6447,6 +6448,34 @@ dsc* evlSign(thread_db* tdbb, const SysFunction*, const NestValueArray& args,
 	return &impure->vlu_desc;
 }
 
+dsc* evlSleep(thread_db* tdbb, const SysFunction* function, const NestValueArray& args,
+	impure_value* impure)
+{
+	fb_assert(args.getCount() == 1);
+
+	Request* request = tdbb->getRequest();
+	//
+	const dsc* value = EVL_expr(tdbb, request, args[0]);
+	if (request->req_flags & req_null)	// return NULL if value is NULL
+		return NULL;
+
+	const SLONG timeout = MOV_get_long(tdbb,value, 0);
+	if( timeout < 0 )
+	{
+		status_exception::raise(
+					Arg::Gds(isc_expression_eval_err) <<
+					Arg::Gds(isc_sysf_argmustbe_nonneg) <<
+					Arg::Str(function->name));
+	}
+	bool ret = false;
+
+	{
+		EngineCheckout checkout(tdbb, FB_FUNCTION);
+		Thread::sleep(timeout);
+	}
+
+	return boolResult(tdbb, impure, ret);
+}
 
 dsc* evlSqrt(thread_db* tdbb, const SysFunction* function, const NestValueArray& args,
 	impure_value* impure)
@@ -6874,6 +6903,7 @@ const SysFunction SysFunction::functions[] =
 		{"SIGN", 1, 1, setParamsDblDec, makeShortResult, evlSign, NULL},
 		{"SIN", 1, 1, setParamsDouble, makeDoubleResult, evlStdMath, (void*) trfSin},
 		{"SINH", 1, 1, setParamsDouble, makeDoubleResult, evlStdMath, (void*) trfSinh},
+		{"SLEEP", 1, 1, setParamsInteger, makeBoolResult, evlSleep, NULL},
 		{"SQRT", 1, 1, setParamsDblDec, makeDblDecResult, evlSqrt, NULL},
 		{"TAN", 1, 1, setParamsDouble, makeDoubleResult, evlStdMath, (void*) trfTan},
 		{"TANH", 1, 1, setParamsDouble, makeDoubleResult, evlStdMath, (void*) trfTanh},
