@@ -6426,8 +6426,6 @@ void LocalDeclarationsNode::genBlr(DsqlCompilerScratch* dsqlScratch)
 	{
 		auto parameter = *ptr;
 
-		dsqlScratch->putDebugSrcInfo(parameter->line, parameter->column);
-
 		if (const auto varNode = nodeAs<DeclareVariableNode>(parameter))
 		{
 			dsql_fld* field = varNode->dsqlDef->type;
@@ -6473,7 +6471,10 @@ void LocalDeclarationsNode::genBlr(DsqlCompilerScratch* dsqlScratch)
 	for (const auto parameter : statements)
 	{
 		if (const auto varNode = nodeAs<DeclareVariableNode>(parameter))
+		{
+			dsqlScratch->putDebugSrcInfo(parameter->line, parameter->column);
 			dsqlScratch->putLocalVariableInit(*declVarIt++, varNode);
+		}
 	}
 
 	if (!isSubRoutine)
