@@ -464,6 +464,7 @@ public:
 	void compileRelation(StreamType stream);
 	unsigned decomposeBoolean(BoolExprNode* boolNode, BoolExprNodeStack& stack);
 	void generateAggregateDistincts(MapNode* map);
+	void generateAggregateSort(AggNode* aggNode);
 	RecordSource* generateRetrieval(StreamType stream,
 									SortNode** sortClause,
 									bool outerFlag,

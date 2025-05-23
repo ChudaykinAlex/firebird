@@ -124,6 +124,7 @@ string AggNode::internalPrint(NodePrinter& printer) const
 	NODE_PRINT(printer, dialect1);
 	NODE_PRINT(printer, arg);
 	NODE_PRINT(printer, asb);
+	NODE_PRINT(printer, sort);
 	NODE_PRINT(printer, indexed);
 
 	return aggInfo.name;
@@ -307,7 +308,7 @@ bool AggNode::dsqlMatch(DsqlCompilerScratch* dsqlScratch, const ExprNode* other,
 	// ASF: We compare name address. That should be ok, as we have only one AggInfo instance
 	// per function.
 	return aggInfo.blr == o->aggInfo.blr && aggInfo.name == o->aggInfo.name &&
-		distinct == o->distinct && dialect1 == o->dialect1;
+		distinct == o->distinct && dialect1 == o->dialect1 && sort == o->sort;
 }
 
 void AggNode::setParameterName(dsql_par* parameter) const
@@ -361,7 +362,7 @@ void AggNode::aggInit(thread_db* tdbb, Request* request) const
 	impure_value_ex* impure = request->getImpure<impure_value_ex>(impureOffset);
 	impure->vlux_count = 0;
 
-	if (distinct)
+	if (distinct || sort)
 	{
 		// Initialize a sort to reject duplicate values.
 
@@ -373,8 +374,8 @@ void AggNode::aggInit(thread_db* tdbb, Request* request) const
 
 		asbImpure->iasb_sort = FB_NEW_POOL(request->req_sorts.getPool()) Sort(
 			tdbb->getDatabase(), &request->req_sorts, asb->length,
-			asb->keyItems.getCount(), 1, asb->keyItems.begin(),
-			RecordSource::rejectDuplicate, 0);
+			asb->keyItems.getCount(), (distinct ? 1 : asb->keyItems.getCount()), asb->keyItems.begin(),
+			(distinct ? RecordSource::rejectDuplicate : nullptr), 0);
 	}
 }
 
@@ -429,6 +430,45 @@ bool AggNode::aggPass(thread_db* tdbb, Request* request) const
 
 			return true;
 		}
+		else if (sort)
+		{
+			fb_assert(asb);
+			// "Put" the value to sort.
+			impure_agg_sort* asbImpure = request->getImpure<impure_agg_sort>(asb->impure);
+			UCHAR* data;
+			asbImpure->iasb_sort->put(tdbb, reinterpret_cast<ULONG**>(&data));
+
+			MOVE_CLEAR(data, asb->length);
+
+			auto descOrder = asb->descOrder.begin();
+			auto keyItem = asb->keyItems.begin();
+
+			for (auto& nodeOrder : sort->expressions)
+			{
+				dsc toDesc = *(descOrder++);
+				toDesc.dsc_address = data + (IPTR)toDesc.dsc_address;
+
+				if (const auto fromDsc = EVL_expr(tdbb, request, nodeOrder))
+				{
+					if (IS_INTL_DATA(fromDsc))
+						INTL_string_to_key(tdbb, INTL_TEXT_TO_INDEX(fromDsc->getTextType()),
+							fromDsc, &toDesc, INTL_KEY_UNIQUE);
+					else
+						MOV_move(tdbb, fromDsc, &toDesc);
+				}
+				else
+					*(data + keyItem->getSkdOffset()) = TRUE;
+
+				// The first key for NULLS FIRST/LAST, the second key for the sorter
+				keyItem += 2;
+			}
+
+			dsc toDesc = asb->desc;
+			toDesc.dsc_address = data + (IPTR)toDesc.dsc_address;
+			MOV_move(tdbb, desc, &toDesc);
+
+			return true;
+		}
 	}
 
 	aggPass(tdbb, request, desc);
@@ -455,7 +495,7 @@ dsc* AggNode::execute(thread_db* tdbb, Request* request) const
 		impure->vlu_blob = NULL;
 	}
 
-	if (distinct)
+	if (distinct || sort)
 	{
 		impure_agg_sort* asbImpure = request->getImpure<impure_agg_sort>(asb->impure);
 		dsc desc = asb->desc;
@@ -478,7 +518,10 @@ dsc* AggNode::execute(thread_db* tdbb, Request* request) const
 				break;
 			}
 
-			desc.dsc_address = data + (asb->intl ? asb->keyItems[1].getSkdOffset() : 0);
+			if (distinct)
+				desc.dsc_address = data + (asb->intl ? asb->keyItems[1].getSkdOffset() : 0);
+			else
+				desc.dsc_address = data + (IPTR)asb->desc.dsc_address;
 
 			aggPass(tdbb, request, &desc);
 		}
@@ -877,9 +920,10 @@ AggNode* AvgAggNode::dsqlCopy(DsqlCompilerScratch* dsqlScratch) /*const*/
 static AggNode::Register<ListAggNode> listAggInfo("LIST", blr_agg_list, blr_agg_list_distinct);
 
 ListAggNode::ListAggNode(MemoryPool& pool, bool aDistinct, ValueExprNode* aArg,
-			ValueExprNode* aDelimiter)
+			ValueExprNode* aDelimiter, ValueListNode* aOrderClause)
 	: AggNode(pool, listAggInfo, aDistinct, false, aArg),
-	  delimiter(aDelimiter)
+	  delimiter(aDelimiter),
+	  dsqlOrderClause(aOrderClause)
 {
 }
 
@@ -889,6 +933,7 @@ DmlNode* ListAggNode::parse(thread_db* tdbb, MemoryPool& pool, CompilerScratch* 
 		(blrOp == blr_agg_list_distinct));
 	node->arg = PAR_parse_value(tdbb, csb);
 	node->delimiter = PAR_parse_value(tdbb, csb);
+	node->sort = PAR_sort(tdbb, csb, blr_sort, true);
 	return node;
 }
 
@@ -899,10 +944,30 @@ void ListAggNode::make(DsqlCompilerScratch* dsqlScratch, dsc* desc)
 	desc->setNullable(true);
 }
 
+void ListAggNode::genBlr(DsqlCompilerScratch* dsqlScratch)
+{
+	AggNode::genBlr(dsqlScratch);
+	GEN_sort(dsqlScratch, blr_sort, dsqlOrderClause);
+}
+
+AggNode* ListAggNode::pass1(thread_db* tdbb, CompilerScratch* csb)
+{
+	if (sort && distinct)
+	{
+		ValueExprNode* const sortNode = *sort->expressions.begin();
+		if (!arg->sameAs(sortNode, false) || sort->expressions.getCount() > 1)
+		{
+			ERR_post(Arg::Gds(isc_sqlerr) << Arg::Num(-104) << Arg::Gds(isc_dsql_command_err)
+										  << Arg::Gds(isc_distinct_order_by_err));
+		}
+	}
+	return AggNode::pass1(tdbb, csb);
+}
+
 bool ListAggNode::setParameterType(DsqlCompilerScratch* dsqlScratch,
 	std::function<void (dsc*)> makeDesc, bool forceVarChar)
 {
-	return PASS1_set_parameter_type(dsqlScratch, arg, makeDesc, forceVarChar) |
+	return PASS1_set_parameter_type(dsqlScratch, arg, makeDesc, forceVarChar) ||
 		PASS1_set_parameter_type(dsqlScratch, delimiter, makeDesc, forceVarChar);
 }
 
@@ -919,6 +984,7 @@ ValueExprNode* ListAggNode::copy(thread_db* tdbb, NodeCopier& copier) const
 	node->nodScale = nodScale;
 	node->arg = copier.copy(tdbb, arg);
 	node->delimiter = copier.copy(tdbb, delimiter);
+	node->sort->copy(tdbb, copier);
 	return node;
 }
 
@@ -984,7 +1050,7 @@ dsc* ListAggNode::aggExecute(thread_db* tdbb, Request* request) const
 {
 	impure_value_ex* impure = request->getImpure<impure_value_ex>(impureOffset);
 
-	if (distinct)
+	if (distinct || sort)
 	{
 		if (impure->vlu_blob)
 		{
@@ -1004,7 +1070,8 @@ AggNode* ListAggNode::dsqlCopy(DsqlCompilerScratch* dsqlScratch) /*const*/
 	thread_db* tdbb = JRD_get_thread_data();
 
 	AggNode* node = FB_NEW_POOL(dsqlScratch->getPool()) ListAggNode(dsqlScratch->getPool(), distinct,
-		doDsqlPass(dsqlScratch, arg), doDsqlPass(dsqlScratch, delimiter));
+		doDsqlPass(dsqlScratch, arg), doDsqlPass(dsqlScratch, delimiter),
+		doDsqlPass(dsqlScratch, dsqlOrderClause));
 
 	dsc argDesc;
 	node->arg->make(dsqlScratch, &argDesc);
