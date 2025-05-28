@@ -1704,12 +1704,14 @@ const StmtNode* EXE_looper(thread_db* tdbb, Request* request, const StmtNode* no
 
 					if (node->hasLineColumn &&
 						node->isProfileAware() &&
-						(!profileNode ||
+						(exeState.forceProfileNextEvaluate ||
+						 !profileNode ||
 						 !(node->line == profileNode->line && node->column == profileNode->column)))
 					{
 						profilerLastTicks = profilerCallAfterPsqlLineColumn();
 						profilerLastAccumulatedOverhead = profilerManager->getAccumulatedOverhead();
 						profileNode = node;
+						exeState.forceProfileNextEvaluate = false;
 
 						profilerManager->beforePsqlLineColumn(request, profileNode->line, profileNode->column);
 					}

@@ -7099,7 +7099,7 @@ void RelationNode::defineSetDefaultTrigger(DsqlCompilerScratch* dsqlScratch,
 		// If the FK table's column is NOT NULL without DEFAULT, we want to avoid the engine throwing a constraint
 		// violation on our trigger's variable, so we declare two variables, one with blr_domain_type_of (don't use
 		// DEFAULT and null flag) and another blr_domain_full with DEFAULT and null flag. We swallow the error when
-		// transfering the value from the second to the first variable.
+		// transferring the value from the second to the first variable.
 
 		// This could be better done with blr_default, but let's maintain backward compatible BLR for now.
 
@@ -12123,7 +12123,7 @@ void GrantRevokeNode::grantRevoke(thread_db* tdbb, jrd_tra* transaction, const G
 			{
 				// In the case where the object is a view, then the grantor must have
 				// some kind of grant privileges on the base table(s)/view(s).  If the
-				// grantor is the owner of the view, then we have to explicitely check
+				// grantor is the owner of the view, then we have to explicitly check
 				// this because the owner of a view by default has grant privileges on
 				// his own view.  If the grantor is not the owner of the view, then the
 				// base table/view grant privilege checks were made when the grantor

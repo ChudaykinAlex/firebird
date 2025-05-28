@@ -5998,6 +5998,10 @@ void ForRangeNode::genBlr(DsqlCompilerScratch* dsqlScratch)
 	dsqlScratch->appendUChar(blr_label);
 	fb_assert(dsqlLabelNumber < MAX_UCHAR);
 	dsqlScratch->appendUChar((UCHAR) dsqlLabelNumber);
+
+	if (hasLineColumn)
+		dsqlScratch->putDebugSrcInfo(line, column);
+
 	dsqlScratch->appendUChar(blr_for_range);
 
 	dsqlScratch->appendUChar(blr_for_range_variable);
@@ -6072,7 +6076,7 @@ ForRangeNode* ForRangeNode::pass2(thread_db* tdbb, CompilerScratch* csb)
 	return this;
 }
 
-const StmtNode* ForRangeNode::execute(thread_db* tdbb, Request* request, ExeState* /*exeState*/) const
+const StmtNode* ForRangeNode::execute(thread_db* tdbb, Request* request, ExeState* exeState) const
 {
 	const auto impure = request->getImpure<Impure>(impureOffset);
 
@@ -6162,6 +6166,7 @@ const StmtNode* ForRangeNode::execute(thread_db* tdbb, Request* request, ExeStat
 				return parentStmt;
 			}
 
+			exeState->forceProfileNextEvaluate = true;
 			request->req_operation = Request::req_evaluate;
 			return statement;
 		}
